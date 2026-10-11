@@ -1,0 +1,97 @@
+3267 import time
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Optional
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+class OptimizedWebScraper:
+    def __init__(self, max_workers: int = 5, timeout: int = 10):
+        self.max_workers = max_workers
+        self.timeout = timeout
+        self.session = self._create_optimized_session()
+
+    def _create_optimized_session(self) -> requests.Session:
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            raise_on_status=False
+        )
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=100,
+            pool_maxsize=100
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+
+    def fetch_url(self, url: str) -> Optional[Dict[str, any]]:
+        start_time = time.time()
+        try:
+            response = self.session.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            elapsed_time = time.time() - start_time
+            logging.info(f"Thành công: {url} (Thời gian: {elapsed_time:.2f}s)")
+            return {
+                "url": url,
+                "status_code": response.status_code,
+                "content_length": len(response.text),
+                "success": True
+            }
+        except requests.exceptions.RequestException as e:
+            elapsed_time = time.time() - start_time
+            logging.error(f"Lỗi khi tải {url}: {e} (Thời gian: {elapsed_time:.2f}s)")
+            return {
+                "url": url,
+                "status_code": None,
+                "content_length": 0,
+                "success": False,
+                "error": str(e)
+            }
+
+    def scrape_concurrently(self, urls: List[str]) -> List[Dict[str, any]]:
+        results = []
+        logging.info(f"Bắt đầu thu thập {len(urls)} URL với {self.max_workers} luồng song song...")
+        start_total = time.time()
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_url = {executor.submit(self.fetch_url, url): url for url in urls}
+            for future in as_completed(future_to_url):
+                result = future.result()
+                if result:
+                    results.append(result)
+                    
+        total_time = time.time() - start_total
+        logging.info(f"Hoàn thành tất cả! Tổng thời gian: {total_time:.2f}s")
+        return results
+
+if _name_ == "_main_":
+    target_urls = [
+        "https://www.python.org",
+        "https://httpbin.org/delay/1",
+        "https://github.com",
+        "https://www.wikipedia.org",
+        "https://httpbin.org/status/200"
+    ]
+
+    scraper = OptimizedWebScraper(max_workers=3, timeout=5)
+    scan_results = scraper.scrape_concurrently(target_urls)
+    
+    print("\n--- BÁO CÁO KẾT QUẢ ---")
+    successful_count = sum(1 for r in scan_results if r["success"])
+    print(f"Tổng số URL đã xử lý: {len(scan_results)}")
+    print(f"Thành công: {successful_count}")
+    print(f"Thất bại: {len(scan_results) - successful_count}")
+Đã gửi
+Soạn
+Viết cho
